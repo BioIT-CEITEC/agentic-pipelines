@@ -1,0 +1,16 @@
+name: agentic-pipelines-env
+channels:
+  - conda-forge
+dependencies:
+  - python==3.10
+  - pandas
+  - ipykernel
+  - ipywidgets
+  - jupyter
+  - pydantic-ai==0.2.4
+  - pip
+  - pip:
+    - scikit-learn
+    - wandb
+    - hrid # ??
+    - timeout-function-decorator # ??
