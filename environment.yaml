@@ -8,9 +8,12 @@ dependencies:
   - ipywidgets
   - jupyter
   - pydantic-ai==0.2.4
+  - python-dotenv
+  - rich
   - pip
   - pip:
     - scikit-learn
     - wandb
     - hrid # ??
     - timeout-function-decorator # ??
+    - pydantic-ai-slim[openai]
