@@ -1,6 +1,7 @@
 name: agentic-pipelines-env
 channels:
   - conda-forge
+  - bioconda
 dependencies:
   - python==3.10
   - pandas
@@ -10,6 +11,7 @@ dependencies:
   - pydantic-ai==0.2.4
   - python-dotenv
   - rich
+  - snakemake
   - pip
   - pip:
     - scikit-learn
