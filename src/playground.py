@@ -2,31 +2,41 @@ import dotenv
 import os
 import subprocess
 import httpx
+import asyncio
+import logging
 
 from dataclasses import dataclass
+from datetime import datetime
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from openai import AsyncOpenAI
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 from rich.console import Console
+from run_logging.local import save_message_history
 
-from src.utils.models import MODELS
+from utils.models import MODELS
+from run_logging.wandb import setup_logging
 
 dotenv.load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     raise ValueError("OPENAI_API_KEY environment variable is not set.")
+wandb_key = os.getenv("WANDB_API_KEY")
+if not wandb_key:
+    raise ValueError("WANDB_API_KEY environment variable is not set.")
+
+DATASET_PATH = "/storage1/workspace/david" # TODO set this to the path of the dataset
+CODE_OUTPUT_PATH = "../generated/" 
 
 config = {
     "model" : MODELS.GPT4o_mini,
     "temperature" : 1,
     "max_run_retries" : 1,
     "max_validation_retries" : 5,
-    "dataset" : "/storage1/workspace/david", # TODO set this to the path of the dataset
-    "prompt" : """Create a bioinformatics pipeline in snakemake for the following:
+    "prompt" : f"""Create a bioinformatics pipeline in snakemake for the following:
         * Quality Control Assessment - Run FastQC analysis and generate MultiQC reports to evaluate the quality of raw sequencing data
         * Data Preprocessing - Perform essential preprocessing steps including:
         * Adapter trimming to remove sequencing artifacts
@@ -37,9 +47,15 @@ config = {
         1) demultiplex the reads (as they are sequenced in Genomics), 
         2) the raw fastq files are checked for quality purposes (meaning PHRED scores and adapter content), 
         3) then the adapters from the raw fastq files are trimmed (usually using cutadapt) and if there are quality issues also it can be assessed in the preprocessing
+
+        Dataset path: {DATASET_PATH}
+        Do not write code anywhere else then to your directory for generated code: {CODE_OUTPUT_PATH}
         """,
     # "prompt" : "toolcalling_agent.yaml", # TODO write prompt to a separate file
     "use_proxy" : False,
+    "workspace_dir" : CODE_OUTPUT_PATH,
+    "tags" : "",
+
 }
 
 async_http_client = httpx.AsyncClient(
@@ -56,6 +72,8 @@ model = OpenAIModel(
     config['model'],
     provider=OpenAIProvider(openai_client=client),
 )
+
+setup_logging(config, api_key=wandb_key)
 
 @dataclass
 class BioinformaticsContext:
@@ -105,12 +123,14 @@ code_agent = Agent(
 async def save_code_to_file(
     ctx: RunContext[BioinformaticsContext], 
     code: str, 
-    filename: str
+    filename: str,
+    # code_folder: str = CODE_OUTPUT_PATH #TODO how to force agent to write code to a specific folder?
 ) -> str:
-    """Save Python code to a file and return confirmation."""
+    f"""Save Python code to a file and return confirmation."""
     try:
         file_path = Path(filename)
         file_path.write_text(code)
+        print(f"Code saved successfully to {filename}")
         return f"Code saved successfully to {filename}"
     except Exception as e:
         return f"Error saving file: {str(e)}"
@@ -156,13 +176,24 @@ def add_implementation_context(ctx: RunContext[BioinformaticsContext]) -> str:
 
 async def generate_bioinformatics_pipeline(
     user_request: str,
-    context: BioinformaticsContext
+    context: BioinformaticsContext,
+    output_dir: Optional[Path] = None
 ) -> tuple[WorkflowDesign, SnakemakeCode]:
     """Generate complete bioinformatics pipeline."""
+
+    history_file = output_dir / f"workflow_design_history_{timestamp}.json"
     
     # Step 1: Design workflow architecture
     workflow_result = await workflow_agent.run(user_request, deps=context)
     design = workflow_result.output
+    message_history = workflow_result.all_messages()
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    history_file = output_dir / f"workflow_design_history_{timestamp}.json"
+    
+    await save_message_history(message_history, history_file)
+    logging.info(f"Workflow design history saved to {history_file}")
+
     
     # Step 2: Generate Snakemake implementation
     code_prompt = f"""Generate Snakemake pipeline implementing this design:
@@ -187,11 +218,14 @@ async def main():
     
     design, code = await generate_bioinformatics_pipeline(
         config['prompt'],
-        context
+        context,
+        output_dir=CODE_OUTPUT_PATH,
     )
     
     print(f"Workflow design: {design.analysis_steps}")
     print(f"Generated Snakemake code:\n{code.snakefile}")
+
+asyncio.run(main())
 
 """
 Prompt
