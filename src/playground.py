@@ -15,21 +15,25 @@ from openai import AsyncOpenAI
 from typing import List, Optional
 from pathlib import Path
 from rich.console import Console
-from run_logging.local import save_message_history
 
-from utils.models import MODELS
+from run_logging.local import save_message_history, save_full_message_history
 from run_logging.wandb import setup_logging
+from utils.models import MODELS
+from utils.create_user import create_new_user_and_rundir
+
 
 dotenv.load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     raise ValueError("OPENAI_API_KEY environment variable is not set.")
-wandb_key = os.getenv("WANDB_API_KEY")
-if not wandb_key:
-    raise ValueError("WANDB_API_KEY environment variable is not set.")
+# wandb_key = os.getenv("WANDB_API_KEY")
+# if not wandb_key:
+#     raise ValueError("WANDB_API_KEY environment variable is not set.")
 
 DATASET_PATH = "/storage1/workspace/david" # TODO set this to the path of the dataset
-CODE_OUTPUT_PATH = "../generated/" 
+CODE_OUTPUT_PATH = Path("../generated/")
+agent_id = create_new_user_and_rundir(workspace_dir = Path(CODE_OUTPUT_PATH))
+CODE_OUTPUT_PATH = CODE_OUTPUT_PATH / agent_id
 
 config = {
     "model" : MODELS.GPT4o_mini,
@@ -50,12 +54,14 @@ config = {
 
         Dataset path: {DATASET_PATH}
         Do not write code anywhere else then to your directory for generated code: {CODE_OUTPUT_PATH}
+
+        At the end, create a bash file containing a command to run a dry run for the created code.
         """,
     # "prompt" : "toolcalling_agent.yaml", # TODO write prompt to a separate file
     "use_proxy" : False,
-    "workspace_dir" : CODE_OUTPUT_PATH,
+    "workspace_dir" : Path(CODE_OUTPUT_PATH),
     "tags" : "",
-
+    "agent_id": agent_id,
 }
 
 async_http_client = httpx.AsyncClient(
@@ -73,7 +79,7 @@ model = OpenAIModel(
     provider=OpenAIProvider(openai_client=client),
 )
 
-setup_logging(config, api_key=wandb_key)
+# setup_logging(config, api_key=wandb_key)
 
 @dataclass
 class BioinformaticsContext:
@@ -181,19 +187,16 @@ async def generate_bioinformatics_pipeline(
 ) -> tuple[WorkflowDesign, SnakemakeCode]:
     """Generate complete bioinformatics pipeline."""
 
-    history_file = output_dir / f"workflow_design_history_{timestamp}.json"
-    
     # Step 1: Design workflow architecture
     workflow_result = await workflow_agent.run(user_request, deps=context)
     design = workflow_result.output
-    message_history = workflow_result.all_messages()
+    workflow_history = workflow_result.all_messages()
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     history_file = output_dir / f"workflow_design_history_{timestamp}.json"
     
-    await save_message_history(message_history, history_file)
+    await save_message_history(workflow_history, history_file)
     logging.info(f"Workflow design history saved to {history_file}")
-
     
     # Step 2: Generate Snakemake implementation
     code_prompt = f"""Generate Snakemake pipeline implementing this design:
@@ -205,6 +208,13 @@ async def generate_bioinformatics_pipeline(
     Original request: {user_request}"""
     
     code_result = await code_agent.run(code_prompt, deps=context)
+    snakemake_history = code_result.all_messages()
+
+    snakemake_history_file = output_dir / f"snakemake_generation_history_{timestamp}.json"
+    await save_message_history(snakemake_history, snakemake_history_file)
+
+    full_history_file = output_dir / f"full_pipeline_history_{timestamp}.json"
+    await save_full_message_history(workflow_history, snakemake_history, design, user_request, context, full_history_file)
     
     return design, code_result.output
 
