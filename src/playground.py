@@ -36,7 +36,8 @@ agent_id = create_new_user_and_rundir(workspace_dir = Path(CODE_OUTPUT_PATH))
 CODE_OUTPUT_PATH = CODE_OUTPUT_PATH / agent_id
 
 config = {
-    "model" : MODELS.GPT4o_mini,
+    # "model" : MODELS.GPT4o_mini,
+    "model" : MODELS.GPT4_1,
     "temperature" : 1,
     "max_run_retries" : 1,
     "max_validation_retries" : 5,
